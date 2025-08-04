@@ -35,3 +35,44 @@ set_response_var <- function(model, response_var) {
   attr(model, "response_var") <- response_var
   return(model)
 }
+
+
+#' Convert response variable to appropriate format for neural networks
+#'
+#' @param y Response variable from model.frame
+#' @return Numeric vector suitable for neural network training
+convert_response_variable = function(y) {
+  
+  if (is.factor(y)) {
+    if (nlevels(y) > 2) {
+      stop("Multi-class classification not currently supported. Please convert to binary (0/1) or use regression.")
+    }
+    message("Converting binary factor to 0/1 encoding for binary classification")
+    return(as.numeric(y) - 1)
+  }
+  
+  if (is.character(y)) {
+    unique_vals = unique(y)
+    if (length(unique_vals) > 2) {
+      stop("Multi-class classification not currently supported. Please convert to binary (0/1) or use regression.")
+    }
+    message("Converting binary character to 0/1 encoding for binary classification")
+    return(as.numeric(as.factor(y)) - 1)
+  }
+  
+  if (is.numeric(y)) {
+    unique_vals = unique(y)
+    if (length(unique_vals) == 2 && all(unique_vals %in% c(0, 1))) {
+      message("Detected binary classification (0/1 encoding)")
+      return(y)
+    }
+    if (length(unique_vals) == 2) {
+      message("Converting binary numeric to 0/1 encoding")
+      return(as.numeric(as.factor(y)) - 1)
+    }
+    # Regression case - return as-is
+    return(y)
+  }
+  
+  stop("Unsupported response variable type. Please use numeric, factor, or character.")
+}

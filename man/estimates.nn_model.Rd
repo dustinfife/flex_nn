@@ -4,7 +4,7 @@
 \alias{estimates.nn_model}
 \title{Compute Variable Importance for Neural Network Models}
 \usage{
-\method{estimates}{nn_model}(object, metric = "mean_absolute_error", ...)
+\method{estimates}{nn_model}(object, metric = NULL, return_metrics = TRUE, ...)
 }
 \arguments{
 \item{object}{A fitted nn_model object}

@@ -98,73 +98,35 @@ get_terms.keras.engine.training.Model <- function(model) {
   return(list(predictors = predictors, response = response))
 }
 
-#' Get Terms from Keras Models
-#'
-#' Extract predictor and response variable names from Keras models.
-#' This function extends flexplot's get_terms function to work with Keras models.
-#'
-#' @param model A fitted Keras model object
-#' @return A list with elements "predictors" and "response"
-#' @method get_terms keras.engine.sequential.Sequential
+#' @method get_terms keras.src.engine.sequential.Sequential
 #' @export
-get_terms.keras.engine.sequential.Sequential = function(model) {
+get_terms.keras.src.engine.sequential.Sequential = function(model) {
   
-  # For Keras models, we need to extract variable information differently
-  # Since we can't get this from the model itself, we'll need to store it
-  # as an attribute when the model is created
-  
-  # Check if variable names were stored as attributes
-  predictors = attr(model, "var_names")
+  # Get the original data variable names (before model.matrix expansion)
+  original_data_vars = attr(model, "original_data_vars")
   response = attr(model, "response_var")
   
-  # If not found, create generic names based on input shape
+  if (!is.null(original_data_vars) && !is.null(response)) {
+    # Remove the response variable from predictors
+    predictors = setdiff(original_data_vars, response)
+    return(list(predictors = predictors, response = response))
+  }
+  
+  # Fallback if not available
+  predictors = attr(model, "var_names")
   if (is.null(predictors)) {
     input_shape = model$input_shape
-    if (is.list(input_shape)) {
-      n_predictors = input_shape[[2]]
-    } else {
-      n_predictors = input_shape[2]
-    }
+    n_predictors = if(is.list(input_shape)) input_shape[[2]] else input_shape[2]
     predictors = paste0("X", 1:n_predictors)
   }
   
-  if (is.null(response)) {
-    response = "Y"
-  }
+  if (is.null(response)) response = "Y"
   
   return(list(predictors = predictors, response = response))
 }
 
 # Helper function for null coalescing
 `%||%` <- function(x, y) if (is.null(x)) y else x
-
-
-
-#' @method get_terms keras.src.engine.sequential.Sequential
-#' @export
-get_terms.keras.src.engine.sequential.Sequential = function(model) {
-  
-  # Check if variable names were stored as attributes
-  predictors = attr(model, "var_names")
-  response = attr(model, "response_var")
-  
-  # If not found, create generic names based on input shape
-  if (is.null(predictors)) {
-    input_shape = model$input_shape
-    if (is.list(input_shape)) {
-      n_predictors = input_shape[[2]]
-    } else {
-      n_predictors = input_shape[2]
-    }
-    predictors = paste0("X", 1:n_predictors)
-  }
-  
-  if (is.null(response)) {
-    response = "Y"
-  }
-  
-  return(list(predictors = predictors, response = response))
-}
 
 # Force registration of the method
 .onLoad = function(libname, pkgname) {
@@ -205,41 +167,94 @@ get_model_n.keras.src.engine.sequential.Sequential = function(model) {
   #' increase in prediction error. Higher increases indicate more important variables.
   #' @importFrom flexplot estimates
   #'
-  #' @method estimates nn_model
-  #' @export
-  estimates.nn_model = function(object, metric = "mean_absolute_error", ...) {
-    
-    # Extract components from nn_model object
-    model = object$model
-    x_test = object$x  # Original (unnormalized) training data
-    y_test = object$y
-    x_means = object$x_means
-    x_sds = object$x_sds
-    
-    # Normalize test data (same as training)
-    x_test_scaled = scale(x_test, center = x_means, scale = x_sds)
-    
-    # Compute baseline performance
-    baseline = model %>% evaluate(x_test_scaled, y_test, verbose = 0)
-    baseline_score = baseline[[metric]]
-    
-    # Compute permutation importance
-    importances = purrr::map_dbl(1:ncol(x_test_scaled), function(i) {
-      x_perm = x_test_scaled
-      x_perm[, i] = sample(x_perm[, i])  # permute column i
-      perm_score = model %>% evaluate(x_perm, y_test, verbose = 0)
-      perm_score[[metric]] - baseline_score  # increase in error = importance
-    })
-    
-    # Create result data frame
-    result = data.frame(
-      variable = colnames(x_test),  # Use original variable names
-      importance = importances
-    )
-    
-    # Sort by importance (descending)
-    result = result[order(result$importance, decreasing = TRUE), ]
-    rownames(result) = NULL  # Clean row names
-    
-    return(result)
+#' @method estimates nn_model
+#' @export
+estimates.nn_model = function(object, metric = NULL, return_metrics = TRUE, ...) {
+  
+  # Extract components from nn_model object
+  model = object$model
+  x_test = object$x
+  y_test = object$y
+  x_means = object$x_means
+  x_sds = object$x_sds
+  
+  # Normalize test data (same as training)
+  x_test_scaled = scale(x_test, center = x_means, scale = x_sds)
+  
+  # Get validation metrics from training history
+  val_metrics = object$history$metrics
+  final_epoch = length(val_metrics$val_loss)
+  
+  # Extract all validation metrics
+  val_metric_names = names(val_metrics)[grepl("^val_", names(val_metrics))]
+  val_values = sapply(val_metric_names, function(m) val_metrics[[m]][final_epoch])
+  
+  # Clean up metric names (remove "val_" prefix for display)
+  clean_names = gsub("^val_", "", val_metric_names)
+  
+  # Auto-detect appropriate metric if not specified
+  if (is.null(metric)) {
+    metric = if ("val_accuracy" %in% val_metric_names) "val_accuracy" else "val_loss"
   }
+  
+  # Add "val_" prefix if not already there
+  if (!grepl("^val_", metric)) {
+    metric = paste0("val_", metric)
+  }
+  
+  # Check if specified metric exists
+  if (!metric %in% val_metric_names) {
+    available_metrics = paste(clean_names, collapse = ", ")
+    stop(paste("Metric", gsub("^val_", "", metric), "not available. Available metrics:", available_metrics))
+  }
+  
+  baseline_score = val_metrics[[metric]][final_epoch]
+  
+  # Compute permutation importance using training data
+  importances = purrr::map_dbl(1:ncol(x_test_scaled), function(i) {
+    x_perm = x_test_scaled
+    x_perm[, i] = sample(x_perm[, i])  # permute column i
+    perm_score = model %>% keras::evaluate(x_perm, y_test, verbose = 0)
+    
+    # Get the corresponding training metric name (without val_ prefix)
+    train_metric = gsub("^val_", "", metric)
+    
+    # For metrics where higher is better (accuracy, auc), we want baseline - permuted
+    # For metrics where lower is better (loss, mse), we want permuted - baseline
+    if (train_metric %in% c("accuracy", "auc", "precision", "recall", "f1_score")) {
+      baseline_score - perm_score[[train_metric]]  # decrease in performance = importance
+    } else {
+      perm_score[[train_metric]] - baseline_score  # increase in error = importance
+    }
+  })
+  
+  # Create variable importance data frame
+  importance_df = data.frame(
+    variable = colnames(x_test),
+    importance = importances
+  )
+  
+  # Sort by importance (descending)
+  importance_df = importance_df[order(importance_df$importance, decreasing = TRUE), ]
+  rownames(importance_df) = NULL
+  
+  # Create metrics data frame using validation metrics
+  metrics_df = data.frame(
+    metric = clean_names,
+    value = unlist(val_values),
+    stringsAsFactors = FALSE
+  )
+  rownames(metrics_df) = NULL
+  
+  # Return structure
+  if (return_metrics) {
+    return(list(
+      importance = importance_df,
+      metrics = metrics_df,
+      primary_metric = gsub("^val_", "", metric),
+      primary_value = baseline_score
+    ))
+  } else {
+    return(importance_df)
+  }
+}

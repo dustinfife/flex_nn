@@ -131,11 +131,25 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
   require(tensorflow)
   require(reticulate)
   
+  tt = terms(formula, data = data)
+  mf = model.frame(tt, data = data)
+  
+  # Store the original data variable names (before expansion)
+  original_vars = names(data)
+  response_var = all.vars(formula)[1]
+  
+  # Continue with your existing code...
+  y = model.response(mf)
+  x = model.matrix(tt, data = data)
+  
   # Extract response and predictors from formula
   tt = terms(formula, data = data)
   mf = model.frame(tt, data = data)
   y = model.response(mf)
   x = model.matrix(tt, data = data)
+  
+  # Convert response variable to appropriate format
+  y = convert_response_variable(y)
   
   # Remove intercept column if present
   if ("(Intercept)" %in% colnames(x)) {
@@ -185,13 +199,14 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
   )
   
   # Fit model
-  history = model %>% fit(
+  history = model %>% keras::fit(
     x_scaled, y,
     epochs = epochs,
     batch_size = batch_size,
     validation_split = validation_split,
     verbose = verbose
   )
+  
   
   # In your nn() function, after creating the model but before returning:
   # Store variable names as attributes on the keras model
@@ -200,8 +215,11 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
   attr(model, "n_samples") = nrow(x_scaled)
   attr(model, "var_names") = var_names
   attr(model, "response_var") = all.vars(formula)[1]
-  attr(model, "x_means") = x_means      # Add this
-  attr(model, "x_sds") = x_sds          # Add this
+  attr(model, "x_means") = x_means      
+  attr(model, "x_sds") = x_sds          
+  attr(model, "original_data_vars") = original_vars
+  attr(model, "response_var") = response_var
+  attr(model, "var_names") = var_names  # Keep this for prediction matrix reconstruction
   
   # Create result object
   result = list(
@@ -218,8 +236,6 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
   # Set class for S3 methods
   class(result) = c("nn_model", class(result))
   
-  # Add this at the very end of your nn() function, just before return(result)
-  cat("About to return result\n")
-  print("Result created successfully")
+
   return(result)
 }
