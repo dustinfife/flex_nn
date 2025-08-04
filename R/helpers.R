@@ -11,14 +11,12 @@
 prepare_keras_data <- function(data, categorical_vars = NULL, encoding_info = NULL) {
   
   # Handle categorical variables
-  if (!is.null(categorical_vars)) {
-    for (var in categorical_vars) {
-      if (var %in% names(data)) {
-        # Basic one-hot encoding - you might want to use a more sophisticated approach
-        data[[var]] <- as.numeric(as.factor(data[[var]])) - 1
-      }
-    }
-  }
+  if (is.null(categorical_vars)) return(as.matrix(data))
+  
+  existing_cats = intersect(categorical_vars, names(data))
+  if (length(existing_cats) == 0) return(as.matrix(data))
+  
+  data[existing_cats] = lapply(data[existing_cats], \(x) as.numeric(as.factor(x)) - 1)
   
   # Convert to matrix
   as.matrix(data)
