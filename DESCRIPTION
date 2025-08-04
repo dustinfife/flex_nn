@@ -1,0 +1,24 @@
+Package: flex_nn
+Type: Package
+Title: Neural Network Extensions for Flexplot
+Version: 0.1.0
+Author: Your Name <your.email@example.com>
+Maintainer: Your Name <your.email@example.com>
+Description: Extends flexplot functionality to support neural network models, 
+    particularly Keras/TensorFlow models. Provides seamless integration with 
+    flexplot's compare.fits function for visualizing neural network predictions.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 3.5.0)
+Imports:
+    flexplot,
+    keras,
+    tensorflow
+Suggests: 
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+RoxygenNote: 7.3.2
