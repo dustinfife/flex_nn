@@ -32,32 +32,90 @@ generate_predictions.keras.engine.training.Model <- function(model, re, pred.val
   return(data.frame(prediction = predictions, model = "keras"))
 }
 
+
+
+#' @importFrom flexplot generate_predictors
+#' @method generate_predictors keras.src.engine.sequential.Sequential
+#' @export
+generate_predictors.keras.src.engine.sequential.Sequential = function(model, data, formula, ...) {
+  
+  ## extract variable slots
+  variables = all.vars(formula, unique=FALSE)
+  outcome = variables[1]
+  predictors = variables[-1]
+  
+  k = flexplot:::bin_if_theres_a_flexplot_formula(formula, data, ...)
+  
+  # identify those variables in the model that are not plotted
+  # (If I don't do this, we'll get a jagged line in the visuals)
+  vars_in_model = flexplot:::get_predictors(model)
+  which_are_missing = flexplot:::remove_nonlinear_terms(vars_in_model[!(vars_in_model %in% variables)])
+  
+  # replace the missing variables with mean (numeric) or a level
+  new_values = which_are_missing %>% purrr::map(flexplot:::return_constant_for_predicted_data, data=k, model=model)
+  if (length(which_are_missing)>0) k[,which_are_missing] = new_values
+  
+  # remove the outcome variable (because it's replaced with "prediction" now)
+  k[,outcome] = NULL
+  # remove variables not in there
+  #find all variables in either formula or model
+  
+  all_variables_in_either = flexplot:::remove_nonlinear_terms(unique(c(predictors, vars_in_model)))
+  return(k[,all_variables_in_either, drop=FALSE])
+}
+
 #' @export
 generate_predictions.keras.src.engine.sequential.Sequential = function(model, re, pred.values, pred.type, report.se) {
-  
-  # Get stored information from training
+
+  # Get stored info
   var_names = attr(model, "var_names")
   x_means = attr(model, "x_means")
   x_sds = attr(model, "x_sds")
+which(is.na(pred.values$teleology))
+  # Ensure pred.values is a data.frame
+  pred.values = as.data.frame(pred.values) %>% drop_na
   
-  # Create full prediction matrix initialized with training means
-  full_pred_matrix = matrix(rep(x_means, each = nrow(pred.values)), 
-                            nrow = nrow(pred.values), 
+  # Convert any ordered factors to unordered (to match model.matrix behavior)
+  pred.values[] = lapply(pred.values, function(x) {
+    if (is.ordered(x)) factor(x, ordered = FALSE) else x
+  })
+
+  # Recreate model matrix from pred.values
+  # Use dummy response (it won't be used)
+  dummy_data = pred.values
+  dummy_data$.y = 0
+  
+  factor_levels = attr(model, "factor_levels")
+  
+  if (!is.null(factor_levels)) {
+    for (var in names(factor_levels)) {
+      if (var %in% names(dummy_data)) {
+        dummy_data[[var]] = factor(dummy_data[[var]], levels = factor_levels[[var]])
+      }
+    }
+  }
+  
+  
+  mm = model.matrix(.y ~ ., data = dummy_data)[, -1, drop = FALSE]  # drop intercept
+  
+  # Initialize full matrix with means
+  full_pred_matrix = matrix(rep(x_means, each = nrow(mm)),
+                            nrow = nrow(mm),
                             ncol = length(var_names))
   colnames(full_pred_matrix) = var_names
   
-  # Replace with provided values (vectorized)
-  common_vars = intersect(names(pred.values), var_names)
-  full_pred_matrix[, common_vars] = as.matrix(pred.values[common_vars])
+  # Replace matching values
+  matching_vars = intersect(colnames(mm), var_names)
+  full_pred_matrix[, matching_vars] = mm[, matching_vars]
   
-  # Normalize the full matrix
+  # Normalize
   if (!is.null(x_means) && !is.null(x_sds)) {
     full_pred_matrix = scale(full_pred_matrix, center = x_means, scale = x_sds)
   }
   
-  # Generate predictions
-  predictions = predict(model, full_pred_matrix)
   
+  # Predict
+  predictions = predict(model, full_pred_matrix)
   if (is.matrix(predictions) && ncol(predictions) == 1) {
     predictions = as.vector(predictions)
   }
@@ -75,7 +133,7 @@ generate_predictions.keras.src.engine.sequential.Sequential = function(model, re
 #' @return A list with elements "predictors" and "response"
 #' @export
 get_terms.keras.engine.training.Model <- function(model) {
-  
+  browser()
   # For Keras models, we need to extract variable information differently
   # This is a basic implementation - you may need to store variable names
   # during model training or pass them as attributes

@@ -138,6 +138,13 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
   original_vars = names(data)
   response_var = all.vars(formula)[1]
   
+  # Save all factor (and ordered factor) levels from raw data
+  factor_levels = lapply(original_vars, function(x) {
+    if (is.factor(data[,x]) || is.ordered(data[,x])) levels(data[,x]) else NULL
+  })
+  are_factors = which(!sapply(factor_levels, is.null))
+  factor_levels = factor_levels[are_factors]
+  names(factor_levels) = original_vars[are_factors]
   # Continue with your existing code...
   y = model.response(mf)
   x = model.matrix(tt, data = data)
@@ -207,9 +214,11 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
     verbose = verbose
   )
   
+
   
-  # In your nn() function, after creating the model but before returning:
-  # Store variable names as attributes on the keras model
+
+  # Attach to model
+  attr(model, "factor_levels") = factor_levels
   attr(model, "var_names") = var_names
   attr(model, "response_var") = all.vars(formula)[1]  # First variable is response
   attr(model, "n_samples") = nrow(x_scaled)
