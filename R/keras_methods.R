@@ -1,142 +1,30 @@
-#' Generate Predictions for Keras Models
-#'
-#' S3 method for generating predictions from Keras models for use with flexplot's
-#' compare.fits function.
-#'
-#' @param model A fitted Keras model object
-#' @param re Should random effects be predicted? (Not applicable for neural networks, ignored)
-#' @param pred.values Data frame containing predictor values for prediction
-#' @param pred.type Type of predictions (ignored for neural networks)
-#' @param report.se Should standard errors be reported? (Not supported for neural networks)
-#' @return A data frame with columns "prediction" and "model"
-#' @export
-#' @importFrom flexplot generate_predictions
-#' @method generate_predictions keras.engine.training.Model
-generate_predictions.keras.engine.training.Model <- function(model, re, pred.values, pred.type, report.se) {
 
-  # Convert pred.values to matrix format expected by Keras
-  # Assumes all predictors are numeric - may need adjustment for categorical variables
-  pred_matrix <- as.matrix(pred.values)
+
+
+get_sequence_of_target_variable = function(x_label, data) {
   
-  # Generate predictions
-  predictions <- keras::predict(model, pred_matrix)
+  data[,paste0(x_label, "_sequence")] = data[,x_label]
+  x_variable = data[,x_label]
+  if (is.factor(x_variable)) return(data)
+  if (!is.numeric(x_variable)) return(data)
   
-  # Handle different output shapes
-  if (is.matrix(predictions) && ncol(predictions) == 1) {
-    predictions <- as.vector(predictions)
-  } else if (is.matrix(predictions) && ncol(predictions) > 1) {
-    # For multi-class classification, take the class with highest probability
-    predictions <- apply(predictions, 1, which.max) - 1  # Convert to 0-based indexing
-  }
+  unique_values = length(unique(x_variable))
+  if (unique_values < 10) return(data)
   
-  return(data.frame(prediction = predictions, model = "keras"))
+  
+  bins = quantile(x_variable, probs = seq(from=0, to=1, length.out=10)) %>% unique
+  new_labels = (diff(bins)/2)+bins
+  new_labels = new_labels[-length(new_labels)]
+  data[,paste0(x_label, "_sequence")] = cut(x_variable, breaks=bins, include.lowest=T, new_labels)
+  return(data)
+  
 }
 
 
 
-#' @importFrom flexplot generate_predictors
-#' @method generate_predictors keras.src.engine.sequential.Sequential
-#' @export
-generate_predictors.keras.src.engine.sequential.Sequential = function(model, data, formula, ...) {
-  
-  ## extract variable slots
-  variables = all.vars(formula, unique=FALSE)
-  outcome = variables[1]
-  predictors = variables[-1]
-  
-  k = flexplot:::bin_if_theres_a_flexplot_formula(formula, data, ...)
-  
-  # identify those variables in the model that are not plotted
-  # (If I don't do this, we'll get a jagged line in the visuals)
-  vars_in_model = flexplot:::get_predictors(model)
-  which_are_missing = flexplot:::remove_nonlinear_terms(vars_in_model[!(vars_in_model %in% variables)])
-  
-  # replace the missing variables with mean (numeric) or a level
-  new_values = which_are_missing %>% purrr::map(flexplot:::return_constant_for_predicted_data, data=k, model=model)
-  if (length(which_are_missing)>0) k[,which_are_missing] = new_values
-  
-  # remove the outcome variable (because it's replaced with "prediction" now)
-  k[,outcome] = NULL
-  # remove variables not in there
-  #find all variables in either formula or model
-  
-  all_variables_in_either = flexplot:::remove_nonlinear_terms(unique(c(predictors, vars_in_model)))
-  return(k[,all_variables_in_either, drop=FALSE])
-}
-
-#' @export
-generate_predictions.keras.src.engine.sequential.Sequential = function(model, re, pred.values, pred.type, report.se) {
-
-  # Get stored info
-  var_names = attr(model, "var_names")
-  x_means = attr(model, "x_means")
-  x_sds = attr(model, "x_sds")
-which(is.na(pred.values$teleology))
-  # Ensure pred.values is a data.frame
-  pred.values = as.data.frame(pred.values) %>% drop_na
-  
-  # Convert any ordered factors to unordered (to match model.matrix behavior)
-  pred.values[] = lapply(pred.values, function(x) {
-    if (is.ordered(x)) factor(x, ordered = FALSE) else x
-  })
-
-  # Recreate model matrix from pred.values
-  # Use dummy response (it won't be used)
-  dummy_data = pred.values
-  dummy_data$.y = 0
-  
-  factor_levels = attr(model, "factor_levels")
-  
-  if (!is.null(factor_levels)) {
-    for (var in names(factor_levels)) {
-      if (var %in% names(dummy_data)) {
-        dummy_data[[var]] = factor(dummy_data[[var]], levels = factor_levels[[var]])
-      }
-    }
-  }
-  
-  
-  mm = model.matrix(.y ~ ., data = dummy_data)[, -1, drop = FALSE]  # drop intercept
-  
-  # Initialize full matrix with means
-  full_pred_matrix = matrix(rep(x_means, each = nrow(mm)),
-                            nrow = nrow(mm),
-                            ncol = length(var_names))
-  colnames(full_pred_matrix) = var_names
-  
-  # Replace matching values
-  matching_vars = intersect(colnames(mm), var_names)
-  full_pred_matrix[, matching_vars] = mm[, matching_vars]
-  
-  # Normalize
-  if (!is.null(x_means) && !is.null(x_sds)) {
-    full_pred_matrix = scale(full_pred_matrix, center = x_means, scale = x_sds)
-  }
-  
-  
-  # Predict
-  predictions = predict(model, full_pred_matrix)
-  if (is.matrix(predictions) && ncol(predictions) == 1) {
-    predictions = as.vector(predictions)
-  }
-  
-  return(data.frame(prediction = predictions, model = "keras"))
-}
-
-
-#' Get Terms from Keras Models
-#'
-#' Extract predictor and response variable names from Keras models.
-#' This function extends flexplot's get_terms function to work with Keras models.
-#'
-#' @param model A fitted Keras model object
-#' @return A list with elements "predictors" and "response"
+# get_terms methods -------------------------------------------------------
 #' @export
 get_terms.keras.engine.training.Model <- function(model) {
-  browser()
-  # For Keras models, we need to extract variable information differently
-  # This is a basic implementation - you may need to store variable names
-  # during model training or pass them as attributes
   
   # Get input shape (excluding batch dimension)
   input_shape <- model$input_shape
@@ -156,10 +44,9 @@ get_terms.keras.engine.training.Model <- function(model) {
   return(list(predictors = predictors, response = response))
 }
 
-#' @method get_terms keras.src.engine.sequential.Sequential
+#' @importFrom flexplot get_terms
 #' @export
 get_terms.keras.src.engine.sequential.Sequential = function(model) {
-  
   # Get the original data variable names (before model.matrix expansion)
   original_data_vars = attr(model, "original_data_vars")
   response = attr(model, "response_var")
@@ -183,16 +70,27 @@ get_terms.keras.src.engine.sequential.Sequential = function(model) {
   return(list(predictors = predictors, response = response))
 }
 
-# Helper function for null coalescing
-`%||%` <- function(x, y) if (is.null(x)) y else x
-
-# Force registration of the method
-.onLoad = function(libname, pkgname) {
-  # Register S3 methods
-  registerS3method("get_model_n", "keras.src.engine.sequential.Sequential", 
-                   get_model_n.keras.src.engine.sequential.Sequential)
+#' @export
+get_terms.nn_model = function(model) {
+  
+  nn_model = model
+  model = model$model
+  
+  # Get the original data variable names (before model.matrix expansion)
+  original_data_vars = attr(model, "original_data_vars")
+  response = attr(model, "response_var")
+  
+  # remove DV from predictors
+  if (!is.null(original_data_vars) && !is.null(response)) {
+    # Remove the response variable from predictors
+    predictors = setdiff(original_data_vars, response)
+    return(list(predictors = predictors, response = response))
+  }
+  
+  return(list(predictors = predictors, response = response))
 }
 
+# get_model_n methods -----------------------------------------------------
 #' @importFrom flexplot get_model_n
 #' @method get_model_n keras.src.engine.sequential.Sequential
 #' @export
@@ -204,6 +102,61 @@ get_model_n.keras.src.engine.sequential.Sequential = function(model) {
   # If not available, return NULL
   return(NULL)
 }
+
+# get_fitted methods ------------------------------------------------------
+#' @importFrom flexplot get_fitted
+#' @export
+get_fitted.nn_model = function(model, re=FALSE, pred.values, pred.type="response", report.se=FALSE) {
+  
+  # extract data
+  pred.values = model$x
+  
+  # Separate features and target 
+  X = model$x
+  y = model$y
+  
+  # Convert to matrix and scale (X is already a matrix)
+  X_scaled = scale(X)
+  
+  # Make predictions
+  prediction = predict(model$model, X_scaled)
+  return(prediction)
+}
+
+nn_predict = function(model, newdata) {
+  
+  # extract data
+  X = newdata
+  
+  # Convert to matrix and scale (X is already a matrix)
+  X_scaled = scale(X)
+  
+  # Make predictions
+  prediction = predict(model, X_scaled)
+  return(prediction)
+}
+
+
+#' @importFrom flexplot post_prediction_process_cf
+#' @export
+post_prediction_process_cf.nn_model = function(model1, model2=NULL, predictions, formula, re, k, pred.type="response") {
+  prediction = data.frame(predictions)
+  flexplot:::post_prediction_process_cf.default(model1, model2, prediction, formula, re, k, pred.type="response")
+}
+
+
+# Helper function for null coalescing
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+# Force registration of the method
+.onLoad = function(libname, pkgname) {
+  # Register S3 methods
+  registerS3method("get_model_n", "keras.src.engine.sequential.Sequential", 
+                   get_model_n.keras.src.engine.sequential.Sequential)
+}
+
+
+# Estimates Methods -------------------------------------------------------
 
 
   #' Compute Variable Importance for Neural Network Models
@@ -227,7 +180,7 @@ get_model_n.keras.src.engine.sequential.Sequential = function(model) {
   #'
 #' @method estimates nn_model
 #' @export
-estimates.nn_model = function(object, metric = NULL, return_metrics = TRUE, ...) {
+estimates.nn_model = function(object, metric = NULL, return_metrics = TRUE, importance_method = "shap", ...) {
   
   # Extract components from nn_model object
   model = object$model
@@ -268,51 +221,98 @@ estimates.nn_model = function(object, metric = NULL, return_metrics = TRUE, ...)
   
   baseline_score = val_metrics[[metric]][final_epoch]
   
-  # Compute permutation importance using training data
-  importances = purrr::map_dbl(1:ncol(x_test_scaled), function(i) {
-    x_perm = x_test_scaled
-    x_perm[, i] = sample(x_perm[, i])  # permute column i
-    perm_score = model %>% keras::evaluate(x_perm, y_test, verbose = 0)
+  # Create metrics data frame using validation metrics
+  metrics_pred.values = data.frame(
+    metric = clean_names,
+    value = unlist(val_values),
+    stringsAsFactors = FALSE
+  )
+  rownames(metrics_pred.values) = NULL
+
+  if (importance_method == "shap") {
     
-    # Get the corresponding training metric name (without val_ prefix)
-    train_metric = gsub("^val_", "", metric)
+    require(fastshap) 
+
+    shap_values = explain(
+      object = object$model,         # your keras model
+      X = object$x,               # training data, predictors only
+      pred_wrapper = nn_predict,       # your predict function
+      nsim = 10                 # fewer = faster, but less stable
+    )
     
-    # For metrics where higher is better (accuracy, auc), we want baseline - permuted
-    # For metrics where lower is better (loss, mse), we want permuted - baseline
-    if (train_metric %in% c("accuracy", "auc", "precision", "recall", "f1_score")) {
-      baseline_score - perm_score[[train_metric]]  # decrease in performance = importance
+    shap_df = data.frame(
+      value    = round(shap_values[1,], digits=4)) %>%
+      arrange(desc(value))
+    
+    # Return structure
+    if (return_metrics) {
+      return(list(
+        importance = shap_df,
+        metrics = metrics_pred.values,
+        primary_metric = gsub("^val_", "", metric),
+        primary_value = baseline_score
+      ))
     } else {
-      perm_score[[train_metric]] - baseline_score  # increase in error = importance
+      return(shap_df)
     }
-  })
+   
+    
+    
+  } else {
+    # Compute permutation importance using training data
+    importances = purrr::map_dbl(1:ncol(x_test_scaled), function(i) {
+      x_perm = x_test_scaled
+      x_perm[, i] = sample(x_perm[, i])  # permute column i
+      perm_score = model %>% keras::evaluate(x_perm, y_test, verbose = 0)
+      
+      # Get the corresponding training metric name (without val_ prefix)
+      train_metric = gsub("^val_", "", metric)
+      
+      # For metrics where higher is better (accuracy, auc), we want baseline - permuted
+      # For metrics where lower is better (loss, mse), we want permuted - baseline
+      if (train_metric %in% c("accuracy", "auc", "precision", "recall", "f1_score")) {
+        baseline_score - perm_score[[train_metric]]  # decrease in performance = importance
+      } else {
+        perm_score[[train_metric]] - baseline_score  # increase in error = importance
+      }
+    })
+  }
   
   # Create variable importance data frame
-  importance_df = data.frame(
+  importance_pred.values = data.frame(
     variable = colnames(x_test),
     importance = importances
   )
   
   # Sort by importance (descending)
-  importance_df = importance_df[order(importance_df$importance, decreasing = TRUE), ]
-  rownames(importance_df) = NULL
+  importance_pred.values = importance_pred.values[order(importance_pred.values$importance, decreasing = TRUE), ]
+  rownames(importance_pred.values) = NULL
   
-  # Create metrics data frame using validation metrics
-  metrics_df = data.frame(
-    metric = clean_names,
-    value = unlist(val_values),
-    stringsAsFactors = FALSE
-  )
-  rownames(metrics_df) = NULL
+
   
   # Return structure
   if (return_metrics) {
     return(list(
-      importance = importance_df,
-      metrics = metrics_df,
+      importance = importance_pred.values,
+      metrics = metrics_pred.values,
       primary_metric = gsub("^val_", "", metric),
       primary_value = baseline_score
     ))
   } else {
-    return(importance_df)
+    return(importance_pred.values)
   }
 }
+
+# A custom imputer that replaces NAs with the column median
+median_imputer = function(x) {
+  for (col in colnames(x)) {
+    if (anyNA(x[[col]])) {
+      x[[col]][is.na(x[[col]])] = median(x[[col]], na.rm = TRUE)
+    }
+  }
+  return(x)
+}
+
+
+
+

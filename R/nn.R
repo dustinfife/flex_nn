@@ -239,7 +239,8 @@ nn = function(formula, data, epochs = 100, batch_size = 4, validation_split = 0.
     formula = formula, 
     x = x, 
     y = y,
-    var_names = var_names
+    var_names = var_names,
+    original_names = original_vars
   )
   
   # Set class for S3 methods
