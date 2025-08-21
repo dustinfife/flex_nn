@@ -313,6 +313,100 @@ median_imputer = function(x) {
   return(x)
 }
 
+megashap = function(model, 
+                      X, 
+                      nsim = 100,
+                      predict_function = predict,
+                      sample_size = NULL,
+                      baseline_data = NULL,
+                      verbose = FALSE) {
+  feature_names = colnames(X)
+  p = length(feature_names)
+  n = nrow(X)
+  
+  if (is.null(sample_size)) sample_size = n
+  if (is.null(baseline_data)) {
+    baseline_data = X[sample(n, sample_size, replace = TRUE), , drop = FALSE]
+  }
+  
+  # Initialize SHAP value accumulator
+  shap_values = matrix(0, nrow = n, ncol = p)
+  colnames(shap_values) = feature_names
+  
+  for (sim in 1:nsim) {
+    if (verbose && sim %% 10 == 0) message("Simulation ", sim, " of ", nsim)
+    
+    # Feature order to apply this iteration
+    feature_order = sample(feature_names)
+    
+    # Bootstrap sample from X
+    X_sample = as.data.frame(lapply(X, function(x) sample(x, size = sample_size, replace = TRUE)))
+
+    
+    # Loop over features in this order
+    base_data = baseline_data[rep(1:n, each = 1), , drop = FALSE]
+    preds_prev = matrix(predict_function(model, newdata = base_data), nrow = n)
+    
+    for (feat in feature_order) {
+      # Replace the current feature with actual values from X
+      base_data[[feat]] = X[[feat]]
+      
+      # Get new predictions with that feature replaced
+      preds_new = matrix(predict_function(model, newdata = base_data), nrow = n)
+      
+      # SHAP contribution is the difference
+      shap_values[, feat] = shap_values[, feat] + (preds_new - preds_prev)
+      
+      # Update prediction for next iteration
+      preds_prev = preds_new
+    }
+  }
+  
+  shap_vector = structure(
+    colMeans(abs(shap_values)) / nsim,
+    names = colnames(shap_values)
+  )
+  
+  
+  # Sort by absolute value of SHAP
+  #sorted_shap = shap_vector[order(abs(shap_vector), decreasing = TRUE)]
+  shap_vector
+  
+}
+
+# require(tidyverse)
+# X = read.csv("~/Downloads/health_depression.csv") %>% 
+#   select(-c(IATTotalscores, HPLPTotalscores))
+# 
+# # Fit a model
+# mod = lm(CESD ~ ., data = X)
+# 
+# # Run vectorized SHAP bootstrap
+# shap_vals = megashap(mod, X, nsim = 50, verbose = TRUE)
+# head(shap_vals)
+
+safe_predict = function(object, newdata) {
+  preds = predict(object, newdata)
+  
+  # Force to numeric vector of expected length
+  if (length(preds) == 1 && nrow(newdata) > 1) {
+    preds = rep(preds, nrow(newdata))
+  }
+  
+  return(as.numeric(preds))
+}
 
 
+
+# 
+# shap_vals = fastshap::explain(
+#   mod,
+#   X = X,
+#   nsim = 50,
+#   verbose = TRUE,
+#   pred_wrapper = safe_predict
+# )
+# 
+# shap_vals = fastshap::explain(mod, X = X, nsim = 50, verbose = TRUE,
+#                               pred_wrapper = function(object, newdata) as.numeric(predict(object, newdata)))
 
